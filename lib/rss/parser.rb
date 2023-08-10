@@ -1,0 +1,2 @@
+module RSS
+end
