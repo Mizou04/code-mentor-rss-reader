@@ -1,2 +1,4 @@
 *.lock
 *.sh
+todos.*
+install/*
