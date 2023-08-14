@@ -25,7 +25,10 @@ $urls = []
 COMMANDS=[]
 CONTENT=[]
 WHAT_TO_PRINT=[]
+$channelTitle = ""
 $cursor_pos=0
+$chunk_index=0
+$chunk_size=3
 
 def usage(usage_blink=false)
   Paint[<<-USE, "#a27ff0", :bold, (:rapid_blink if usage_blink)]
@@ -33,7 +36,8 @@ def usage(usage_blink=false)
   commands(after running): 
                  h:     print this text
                  r:     to restart the program
-    up/down arrows:     to move cursor
+               k/j:     up/down
+                 q:     to quit the program
 
   USE
 end
@@ -61,6 +65,36 @@ def ensure_help_not_printed_twice(help_blink=false)
   end
 end
 
+def clearRenderedItems()
+  _lines_count = (WHAT_TO_PRINT.length * 2)
+  _lines_count += usage.count("\n") + 1 if(COMMANDS.last == "help")
+  W_IO << "\e[A" * _lines_count;
+  i = _lines_count;
+  while(i > 0)
+    W_IO << "\e[K" << "\e[B"
+    i -= 1
+  end
+  W_IO << "\e[A" * _lines_count;
+  COMMANDS.pop()
+end
+
+def clearItems()
+  WHAT_TO_PRINT.clear
+end
+
+def chooseItems(i=$chunk_index, n=$chunk_size)
+  clearItems()
+  WHAT_TO_PRINT + CONTENT.slice(i, n)
+  WHAT_TO_PRINT << "(+) load more.." if(i+n < CONTENT.length)
+end
+
+def renderItems
+  WHAT_TO_PRINT.each_with_index do |line, i|
+      W_IO << " #{$cursor_pos == i ? CURSOR : "  "} +" << line << "\n" * 2 
+  end
+end
+
+
 # \e[A moves the cursor up one line
 # \e[B moves the cursor down one line
 # \e[K clear from the cursor to end of line
@@ -70,20 +104,40 @@ def getCommand()
   when "h"
     ensure_help_not_printed_twice()
     getCommand()
+  when "m"
+    if( WHAT_TO_PRINT.last =~ /load more/ &&
+        $cursor_pos == WHAT_TO_PRINT.index(WHAT_TO_PRINT.last) )
+      clearRenderedItems()
+      clearItems()
+      $chunk_index += 1
+      chooseItems($chunk_index, $chunk_size)
+      renderItems()
+      getCommand()
+    end
   when "r"
     ask
     COMMANDS << "read"
-  when "c"
-    $cursor_pos+=1
-    W_IO << "\e[A" * (CONTENT.length * 2);
-    i = CONTENT.length * 2;
-    while(i > 0)
-      W_IO << "\e[K";
-                  W_IO << "\e[B";
-      i -= 1
+  when "k"
+    $cursor_pos-=1
+    if($cursor_pos < 0)
+      $cursor_pos = WHAT_TO_PRINT.length - 1
     end
-    W_IO << "\e[A" * (CONTENT.length * 2);
-  when EOF || Errno::SIGINT
+    clearRenderedItems()
+    renderItems()
+    getCommand()
+  when "j"
+    $cursor_pos+=1
+    if($cursor_pos >= WHAT_TO_PRINT.length)
+      $cursor_pos = 0
+    end
+    clearRenderedItems()
+    renderItems()
+    getCommand()
+  when "c"
+    clearRenderedItems()
+  when EOF
+  #when Errno::SIGINT
+  when "q"
     exit
   else
     ensure_help_not_printed_twice(true)
@@ -97,24 +151,19 @@ def fetchXML
 		doc = REXML::Document.new(file)
 		root = doc.root
 		channel = root.elements["channel"]
-		channelTitle = channel.elements["title"].text
+		$channelTitle = channel.elements["title"].text
 		items = channel.get_elements("item")
     CONTENT.clear
-    CONTENT << "\t\tfrom <<#{Paint[channelTitle, [23, 170, 0]]}>>\t\t\n"
 		items.each_with_index do |thing, i|
 			tTitle = thing.elements["title"].text
-      CONTENT.push " #{$cursor_pos == i ? CURSOR : "  "} -" << tTitle << "\n" * 2 
+      CONTENT.push(tTitle)
     end
 		end
 		#puts root.attributes
 end
 
-def printContent
-  WHAT_TO_PRINT.clear
-  WHAT_TO_PRINT + CONTENT
-  WHAT_TO_PRINT.each_with_index do |line, i|
-      W_IO << line
-  end
+def printTitle
+  W_IO << "\t\tfrom #{Paint[$channelTitle, [23, 170, 50], :bold]}\t\t\n\n"
 end
 
 W_IO.write usage
@@ -122,8 +171,11 @@ ask
 while(true) 
   begin
     getInput()
+    previous_title = $channelTitle
     fetchXML()
-    printContent
+    printTitle() unless $channelTitle == previous_title
+    chooseItems();
+    renderItems()
     getCommand()
   rescue InputError, Errno::ENOENT, REXML::ParseException => e
     STDERR << e.message
