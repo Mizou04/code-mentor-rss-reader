@@ -16,22 +16,24 @@ class Array
 end
 
 class InputError < IOError; end
+#constants
 PROMPT=Paint["> ", [255, 20, 30], :bold, :blink]
 CURSOR=Paint["->", :yellow, :bold]
 EOF="\003"
 R_IO=IO.new(0)
 W_IO=IO.new(1, "w")
-$urls = []
 COMMANDS=[]
 CONTENT=[]
 WHAT_TO_PRINT=[]
+#globals
+$urls = []
 $channelTitle = ""
 $cursor_pos=0
 $chunk_index=0
 $chunk_size=3
 
 def usage(usage_blink=false)
-  Paint[<<-USE, "#a27ff0", :bold, (:rapid_blink if usage_blink)]
+  Paint[<<-USE, "#2fff31", :italic, (:rapid_blink if usage_blink)]
   this is a simple RSS feed reader using terminal as UI
   commands(after running): 
                  h:     print this text
@@ -83,7 +85,7 @@ def clearItems()
 end
 
 def chooseItems(i=$chunk_index, n=$chunk_size)
-  clearItems()
+  WHAT_TO_PRINT.pop()
   WHAT_TO_PRINT + CONTENT.slice(i, n)
   WHAT_TO_PRINT << "(+) load more.." if(i+n < CONTENT.length)
 end
@@ -94,6 +96,12 @@ def renderItems
   end
 end
 
+def resetGlobals
+  CONTENT.clear
+  clearItems
+  $cursor_pos=0
+  $chunk_index=0
+end
 
 # \e[A moves the cursor up one line
 # \e[B moves the cursor down one line
@@ -108,9 +116,9 @@ def getCommand()
     if( WHAT_TO_PRINT.last =~ /load more/ &&
         $cursor_pos == WHAT_TO_PRINT.index(WHAT_TO_PRINT.last) )
       clearRenderedItems()
-      clearItems()
       $chunk_index += 1
       chooseItems($chunk_index, $chunk_size)
+      $cursor_pos = 0;
       renderItems()
       getCommand()
     end
@@ -146,6 +154,7 @@ def getCommand()
 end
 
 def fetchXML
+  resetGlobals()
   $urls.each do |url|
 		file = URI.open(url) 
 		doc = REXML::Document.new(file)
@@ -173,13 +182,20 @@ while(true)
     getInput()
     previous_title = $channelTitle
     fetchXML()
-    printTitle() unless $channelTitle == previous_title
+    if($channelTitle != previous_title)
+      printTitle()
+    else 
+      puts("")
+    end
     chooseItems();
     renderItems()
     getCommand()
-  rescue InputError, Errno::ENOENT, REXML::ParseException => e
-    STDERR << e.message
-    ask("\ntry with a valid RSS url:")
+  rescue InputError, Errno::ENOENT => e
+    STDERR << e.message << "\n"
+    ask("try with a valid RSS url:")
+  rescue REXML::ParseException
+    STDERR << "invalid RSS document\n"
+    ask("try with a valid RSS url:")
   rescue Interrupt
     puts ""
     exit(0) #exit with no errors
